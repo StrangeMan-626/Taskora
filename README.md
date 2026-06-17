@@ -53,6 +53,7 @@ Taskora 不是普通便签，也不是员工监控软件。它的核心定位是
 - [知识库设计方案](docs/KNOWLEDGE_BASE.md)
 - [隐私与安全方案](docs/PRIVACY_SECURITY.md)
 - [开发里程碑与第一版执行计划](docs/ROADMAP.md)
+- [迁移需求清单（Python MVP → .NET/WPF）](docs/MIGRATION_CHECKLIST.md)
 
 ## Product Language
 

@@ -24,6 +24,8 @@ MVP 推荐：
 | Avalonia | .NET 跨平台；XAML 思路接近 WPF；控件和样式能力强 | Taskora 第一版 Windows-only，跨平台收益暂时不高；Win32 集成仍要写平台层 | 后续跨平台再考虑 |
 | Electron | Web 技术开发快；生态大；跨平台 | 常驻内存基线偏高；Win32 activity capture 需要 native bridge；和低资源目标冲突 | 不推荐 MVP |
 
+> 跨平台取舍（2026-06-17）：选定「Windows 先用 WPF，macOS 后续用 Avalonia 重写 UI 层」。前提是业务逻辑平台无关、OS 调用走平台接口（见 §3.1），从而 macOS 版只需重写平台实现 + UI，复用业务逻辑。原生 Swift 方案排除（Swift 无法复用 C# 业务逻辑库，等于整体重写）。
+
 ## 3. 解决方案结构
 
 建议 solution：
@@ -33,6 +35,8 @@ Taskora.sln
 src/
   Taskora.Desktop/
   Taskora.Core/
+  Taskora.Platform/
+  Taskora.Platform.Windows/
   Taskora.Activity/
   Taskora.Tasks/
   Taskora.AI/
@@ -49,12 +53,40 @@ tests/
 
 - Taskora.Desktop：WPF UI、托盘、桌面便签窗口、设置页。
 - Taskora.Core：领域模型、时间处理、应用服务接口。
-- Taskora.Activity：前台窗口采样、空闲检测、activity span 聚合。
+- Taskora.Platform：OS 能力的平台无关接口（前台窗口、空闲、密钥存储、开机自启、托盘），上层只依赖接口。
+- Taskora.Platform.Windows：上述接口的 Windows 实现（Win32 P/Invoke、DPAPI、注册表 Run）。
+- Taskora.Activity：activity span 聚合与合并规则；前台窗口/空闲数据经 Taskora.Platform 接口获取，不直接 P/Invoke。
 - Taskora.Tasks：任务状态机、任务会话、进展记录。
 - Taskora.AI：provider adapter、prompt 构建、AI 输出解析。
 - Taskora.KnowledgeBase：知识条目、搜索、Markdown 导出。
 - Taskora.Storage：SQLite 连接、迁移、repository。
 - Taskora.Settings：JSON 配置、隐私规则、provider 配置。
+
+### 3.1 跨平台分层与可移植性（为后续 macOS 版准备）
+
+跨平台决策（2026-06-17）：第一版 Windows 用 WPF；macOS 作为后续目标。原则：把 OS 相关代码收敛到 `Taskora.Platform` 接口背后，换平台时只替换「平台实现 + UI」，业务逻辑层不动。
+
+| 层 | 模块 | 跨平台性 |
+| --- | --- | --- |
+| ① 业务逻辑（平台无关） | Core / Tasks / AI / KnowledgeBase / Storage / Settings（逻辑部分）、Activity 的聚合 | ✅ Windows / macOS 完全复用 |
+| ② 平台集成（接口隔离） | Taskora.Platform 接口 + 各 OS 实现（Platform.Windows / 后续 Platform.MacOS） | ⚠️ 每个 OS 一套实现，macOS 需新写 |
+| ③ UI | Taskora.Desktop（WPF，仅 Windows）；后续 Taskora.Desktop.Avalonia（macOS） | ⚠️ macOS 用 Avalonia 另写 |
+
+平台接口（Windows 实现先做，macOS 实现后续做）：
+
+- `IForegroundWindowProvider`：取前台进程名/窗口标题。Win：`GetForegroundWindow` 系列；Mac：Accessibility API / `NSWorkspace`。
+- `IIdleDetector`：取空闲秒数。Win：`GetLastInputInfo`；Mac：`CGEventSourceSecondsSinceLastEventType`。
+- `ISecretStore`：API Key 安全存储。Win：DPAPI / 凭据管理器；Mac：Keychain。
+- `IAutostart`：开机自启。Win：注册表 Run；Mac：LaunchAgent。
+- `ITrayIcon`：托盘常驻。Win：WPF/Win32；Mac：`NSStatusItem`（或 Avalonia 内置 `TrayIcon`）。
+
+约束：
+
+- 业务逻辑层（①）不得直接 P/Invoke 或引用 WPF/Win32 类型，所有 OS 调用必须经上述接口。
+- Storage 用跨平台的 `Microsoft.Data.Sqlite`，不引入 Windows 专属依赖。
+- 为什么不走原生 Swift：Swift 无法复用 C# 业务逻辑库，会导致业务 + UI 整体重写，违背本分层的省工目标。
+
+macOS 移植路径（后续里程碑）：新增 `Taskora.Platform.MacOS`（实现 ② 的各接口）+ `Taskora.Desktop.Avalonia`（③），① 层原样引用，预计不改业务代码。
 
 ## 4. 运行时组件
 
